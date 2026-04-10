@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # ⚡ TaskFlow — Real-Time Collaborative Task Manager
 
 > **Full-stack portfolio project** showcasing React, Node.js, Socket.io, JWT Auth, and Stripe Subscriptions.
@@ -190,3 +191,7 @@ Uses Stripe Checkout for payment flow and webhooks to sync subscription status t
 - ✅ React state management with Context API
 - ✅ Custom hooks for reusable logic
 - ✅ Environment-based configuration
+=======
+# Task-Flow
+Project
+>>>>>>> 98ceffbeae40fef9ff8266676b73663c431be9e0
