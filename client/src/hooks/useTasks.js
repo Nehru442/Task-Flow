@@ -7,95 +7,151 @@ export const useTasks = (boardId) => {
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [notifications, setNotifications] = useState([]);
+
   const { socket } = useSocket();
   const { user } = useAuth();
+
   const notifIdRef = useRef(0);
 
+  // ─── Notifications ─────────────────────────────────────────────
   const addNotification = useCallback((msg) => {
     const id = ++notifIdRef.current;
+
     setNotifications((prev) => [...prev, { id, msg }]);
+
     setTimeout(() => {
       setNotifications((prev) => prev.filter((n) => n.id !== id));
     }, 3500);
   }, []);
 
-  // Fetch tasks on mount
+  // ─── Fetch Tasks ───────────────────────────────────────────────
   useEffect(() => {
     if (!boardId) return;
-    const fetch = async () => {
+
+    const fetchTasks = async () => {
       try {
-        const { data } = await api.get(`/tasks/boards/${boardId}/tasks`);
-        setTasks(data.tasks);
+        const res = await api.get(`/tasks/boards/${boardId}/tasks`);
+        setTasks(res.data.tasks || []);
       } catch (err) {
-        console.error(err);
+        console.error('Fetch tasks error:', err);
       } finally {
         setLoading(false);
       }
     };
-    fetch();
+
+    fetchTasks();
   }, [boardId]);
 
-  // Socket.io: join board room and listen for events
+  // ─── Socket Events ─────────────────────────────────────────────
   useEffect(() => {
     if (!socket || !boardId || !user) return;
 
     socket.emit('join-board', { boardId, userName: user.name });
 
-    socket.on('task-created', ({ task }) => {
-      setTasks((prev) => [...prev, task]);
+    // ✅ TASK CREATED
+    const onTaskCreated = ({ task }) => {
+      setTasks((prev) => {
+        const exists = prev.find((t) => t._id === task._id);
+        if (exists) return prev; // prevent duplicate
+        return [...prev, task];
+      });
+
       addNotification(`New task added: "${task.title}"`);
-    });
+    };
 
-    socket.on('task-updated', ({ task, updatedBy }) => {
-      setTasks((prev) => prev.map((t) => (t._id === task._id ? task : t)));
-      if (updatedBy?.id !== user.id) {
-        addNotification(`${updatedBy?.name || 'Someone'} moved "${task.title}" → ${task.column}`);
+    // ✅ TASK UPDATED
+    const onTaskUpdated = ({ task, updatedBy }) => {
+      setTasks((prev) =>
+        prev.map((t) => (t._id === task._id ? task : t))
+      );
+
+      if (updatedBy?.id !== user?.id) {
+        addNotification(
+          `${updatedBy?.name || 'Someone'} moved "${task.title}" → ${task.column}`
+        );
       }
-    });
+    };
 
-    socket.on('task-deleted', ({ taskId }) => {
+    // ✅ TASK DELETED
+    const onTaskDeleted = ({ taskId }) => {
       setTasks((prev) => prev.filter((t) => t._id !== taskId));
-    });
+    };
 
-    socket.on('user-joined', ({ userName }) => {
+    // ✅ USER JOINED
+    const onUserJoined = ({ userName }) => {
       addNotification(`${userName} joined the board`);
-    });
+    };
 
+    // Register events
+    socket.on('task-created', onTaskCreated);
+    socket.on('task-updated', onTaskUpdated);
+    socket.on('task-deleted', onTaskDeleted);
+    socket.on('user-joined', onUserJoined);
+
+    // Cleanup
     return () => {
       socket.emit('leave-board', { boardId, userName: user.name });
-      socket.off('task-created');
-      socket.off('task-updated');
-      socket.off('task-deleted');
-      socket.off('user-joined');
+
+      socket.off('task-created', onTaskCreated);
+      socket.off('task-updated', onTaskUpdated);
+      socket.off('task-deleted', onTaskDeleted);
+      socket.off('user-joined', onUserJoined);
     };
   }, [socket, boardId, user, addNotification]);
 
-  const createTask = useCallback(
-    async (payload) => {
-      const { data } = await api.post(`/tasks/boards/${boardId}/tasks`, payload);
-      // Note: socket will also fire task-created, but we don't double-add
-      // because the socket event is emitted to OTHER users in the room only
-      setTasks((prev) => [...prev, data.task]);
-      return data.task;
-    },
-    [boardId]
-  );
+  // ─── CREATE TASK ───────────────────────────────────────────────
+  const createTask = useCallback(async (payload) => {
+    const res = await api.post(`/tasks/boards/${boardId}/tasks`, payload);
 
+    const newTask = res.data.task;
+
+    // ⚠️ Prevent duplicate (API + socket)
+    setTasks((prev) => {
+      const exists = prev.find((t) => t._id === newTask._id);
+      if (exists) return prev;
+      return [...prev, newTask];
+    });
+
+    return newTask;
+  }, [boardId]);
+
+  // ─── UPDATE TASK ───────────────────────────────────────────────
   const updateTask = useCallback(async (taskId, payload) => {
-    const { data } = await api.put(`/tasks/${taskId}`, payload);
-    setTasks((prev) => prev.map((t) => (t._id === taskId ? data.task : t)));
-    return data.task;
+    const res = await api.put(`/tasks/${taskId}`, payload);
+
+    const updatedTask = res.data.task;
+
+    setTasks((prev) =>
+      prev.map((t) => (t._id === taskId ? updatedTask : t))
+    );
+
+    return updatedTask;
   }, []);
 
+  // ─── DELETE TASK ───────────────────────────────────────────────
   const deleteTask = useCallback(async (taskId) => {
     await api.delete(`/tasks/${taskId}`);
+
     setTasks((prev) => prev.filter((t) => t._id !== taskId));
   }, []);
 
+  // ─── FILTER BY COLUMN ──────────────────────────────────────────
   const getTasksByColumn = useCallback(
-    (column) => tasks.filter((t) => t.column === column).sort((a, b) => a.order - b.order),
+    (column) => {
+      return tasks
+        .filter((t) => t.column === column)
+        .sort((a, b) => a.order - b.order);
+    },
     [tasks]
   );
 
-  return { tasks, loading, notifications, createTask, updateTask, deleteTask, getTasksByColumn };
+  return {
+    tasks,
+    loading,
+    notifications,
+    createTask,
+    updateTask,
+    deleteTask,
+    getTasksByColumn,
+  };
 };
