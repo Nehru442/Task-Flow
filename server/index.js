@@ -18,10 +18,7 @@ const httpServer = http.createServer(app);
 // Socket.io setup
 const io = new Server(httpServer, {
   cors: {
-        origin: [
-      'http://localhost:5173',
-      'https://task-flow-client-blond.vercel.app'
-    ],
+    origin: process.env.CLIENT_URL || 'http://localhost:5173',
     methods: ['GET', 'POST'],
     credentials: true,
   },
